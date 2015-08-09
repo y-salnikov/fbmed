@@ -1,0 +1,683 @@
+#!/usr/bin/env python
+# -*- encoding=UTF-8 -*-
+#
+# Fluxbox menu editor (fbmed) by y.salnikov
+#
+#
+#
+#       This program is free software; you can redistribute it and/or modify
+#       it under the terms of the GNU General Public License as published by
+#       the Free Software Foundation; either version 2 of the License, or
+#       (at your option) any later version.
+#       
+#       This program is distributed in the hope that it will be useful,
+#       but WITHOUT ANY WARRANTY; without even the implied warranty of
+#       MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#       GNU General Public License for more details.
+#       
+#       You should have received a copy of the GNU General Public License
+#       along with this program; if not, write to the Free Software
+#       Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston,
+#       MA 02110-1301, USA.
+#
+import pygtk,os,re
+pygtk.require('2.0')
+import gtk
+
+
+fbm=[]
+stack=[fbm]
+current_line=[]
+path=[]
+toolbar=[]
+submenu_list=[]
+ident=0
+ident_str="\t"
+current_img_folder=os.path.expanduser("~")
+
+def find_line(pth):
+    cur=fbm
+    line=[]
+    for i in pth:
+        line=cur[i]
+        cur=line[-1]
+    return line
+
+def update_preview_cb(file_chooser, preview):
+            filename = file_chooser.get_preview_filename()
+            try:
+                pixbuf = gtk.gdk.pixbuf_new_from_file_at_size(filename, 32, 32)
+                preview.set_from_pixbuf(pixbuf)
+                have_preview = True
+            except:
+                have_preview = False
+            file_chooser.set_preview_widget_active(have_preview)
+            return
+
+        
+class open_image_dialog:
+    def __init__(self):
+        global current_img_folder
+        self.dialog=gtk.FileChooserDialog(title="Open image file", action=gtk.FILE_CHOOSER_ACTION_OPEN, buttons=(gtk.STOCK_CANCEL, gtk.RESPONSE_CANCEL, gtk.STOCK_OPEN, gtk.RESPONSE_OK))
+        self.dialog.set_default_response(gtk.RESPONSE_OK)
+        self.preview = gtk.Image()
+        self.dialog.set_preview_widget(self.preview)
+        self.dialog.connect("update-preview", update_preview_cb, self.preview)
+        self.filter = gtk.FileFilter()
+        self.filter.set_name("Images")
+        self.filter.add_mime_type("image/png")
+        self.filter.add_mime_type("image/jpeg")
+        self.filter.add_mime_type("image/gif")
+        self.filter.add_pattern("*.png")
+        self.filter.add_pattern("*.jpg")
+        self.filter.add_pattern("*.gif")
+        self.filter.add_pattern("*.tif")
+        self.filter.add_pattern("*.xpm")
+        self.dialog.add_filter(self.filter)
+        self.dialog.set_current_folder(current_img_folder)
+    def run(self):
+        return self.dialog.run()
+    def get_filename(self):
+        global current_img_folder
+        current_img_folder=self.dialog.get_current_folder()
+        return self.dialog.get_filename()
+    def destroy(self):
+        self.dialog.destroy()
+    
+class save_dialog:
+    def __init__(self):
+        self.dialog=gtk.FileChooserDialog(title="Save menu", action=gtk.FILE_CHOOSER_ACTION_SAVE, buttons=(gtk.STOCK_CANCEL, gtk.RESPONSE_CANCEL, gtk.STOCK_SAVE, gtk.RESPONSE_OK))
+        self.dialog.set_default_response(gtk.RESPONSE_OK)
+        self.dialog.set_current_folder(os.path.expanduser("~/.fluxbox/"))
+        self.dialog.set_current_name("menu")
+    def run(self):
+        return self.dialog.run()
+    def get_filename(self):
+        return self.dialog.get_filename()
+    def destroy(self):
+        self.dialog.destroy()
+
+
+class handlers_class:
+    def convert_path(self,path_str):
+        p1=path_str.split(":")
+        p2=[ int(i) for i in p1]
+        return tuple(p2)
+    def copy_subtree(self,tree_store, from_iter, to_iter):
+        n=tree_store.get_n_columns()
+        for i in xrange(n):
+            tree_store.set_value(to_iter,i,tree_store.get_value(from_iter,i))
+        if not tree_store.iter_has_child(from_iter):
+            return
+        from_path = list(tree_store.get_path(from_iter))
+        for from_child_number in range(0, tree_store.iter_n_children(from_iter)):
+            from_child_path = from_path[:]
+            from_child_path.append(from_child_number)
+            from_child = tree_store.get_iter(tuple(from_child_path))
+            to_child = tree_store.append(to_iter, row=tree_store[tuple(from_child_path)])
+            self.copy_subtree(tree_store, from_child, to_child)
+    def delete_event(self, widget, event, data=None):
+        return False
+    def delete_event_d(self, widget, event, data=None):
+        widget.hide()
+        return True
+    def destroy(self, widget, data=None):
+        gtk.main_quit()
+    def title_edited_cb(self, widget, pth, new_text,data):
+        p=self.convert_path(pth)
+        line=find_line(p)
+        line[1]=new_text
+        i1=title_tree.get_iter(p)
+        title_tree.set_value(i1,0,new_text)
+        
+    def cmd_edited_cb(self, widget, pth, new_text,data):
+        p=self.convert_path(pth)
+        line=find_line(p)
+        line[2]=new_text
+        i1=title_tree.get_iter(p)
+        title_tree.set_value(i1,2,new_text)
+    def img_clicked(self, widget, data=None):
+        pass
+    def tree_selected(self,tree):
+        for i in toolbar: i.set_sensitive(True)
+        global current_line
+        global path
+        iter=tree.get_selection().get_selected()[1]
+        store=tree.get_selection().get_selected()[0]
+        path=store.get_path(iter)
+        current_line=find_line(path)
+#        print current_line[1]
+    def open_img(self,widget):
+        open_img_dialog=open_image_dialog()
+        response = open_img_dialog.run()
+        if response == gtk.RESPONSE_OK:
+            img_file=open_img_dialog.get_filename()
+            find_line(path)[3]=img_file
+            iter=title_tree.get_iter(path)
+            pb=gtk.gdk.pixbuf_new_from_file(img_file).scale_simple(16,16,gtk.gdk.INTERP_BILINEAR)
+            title_tree.set_value(iter,3,pb)
+        else:
+            pass
+        open_img_dialog.destroy()
+    def delete_icon(self,widget):
+        find_line(path)[3]=""
+        iter=title_tree.get_iter(path)
+        pb=tree.render_icon(stock_id=gtk.STOCK_MISSING_IMAGE,
+                                size=gtk.ICON_SIZE_MENU,
+                                detail=None)
+        title_tree.set_value(iter,3,pb)
+    def move_up(self,widget):
+        global path
+        line=find_line(path)
+        if len(path)==1:
+            parent=fbm
+        else:
+            parent=find_line(path[:-1])[4]
+#        ind=parent.index(line)
+        ind=path[-1]
+        if ind==0 or ind==len(parent)-1: return
+        if ind==1 and len(path)==1: return
+        del parent[ind]
+        parent.insert(ind-1,line)
+        i1=title_tree.get_iter(path)
+        p=list(path[:])
+        p[-1]-=1
+        i2=title_tree.get_iter(tuple(p))
+        title_tree.swap(i1,i2)
+        path=tuple(p)
+        current_line=find_line(p)
+    def move_down(self,widget):
+        global path
+        line=find_line(path)
+        if len(path)==1:
+            parent=fbm
+        else:
+            parent=find_line(path[:-1])[4]
+#        ind=parent.index(line)
+        ind=path[-1]
+        if ind==len(parent)-1 or ind==len(parent)-2: return
+        if len(path)==1 and ind==0: return
+        del parent[ind]
+        parent.insert(ind+1,line)
+        i1=title_tree.get_iter(path)
+        p=list(path[:])
+        p[-1]+=1
+        i2=title_tree.get_iter(tuple(p))
+        title_tree.swap(i1,i2)
+        path=tuple(p)
+        current_line=find_line(p)
+    def move_left(self,widget):
+        global path
+        line=find_line(path)
+        if len(path)==1: return
+        parent=find_line(path[:-1])[4]
+        if len(path)==2:
+            parent2=fbm
+        else:
+            parent2=find_line(path[:-2])[4]
+        ind=path[-1]
+        ind2=path[-2]
+        if ind==len(parent)-1: return
+        del parent[ind]
+        parent2.insert(ind2,line)
+        i1=title_tree.get_iter(path)
+        i2=title_tree.iter_parent(i1)
+        i3=title_tree.iter_parent(i2)
+        i4=title_tree.insert_before(i3,i2,None)
+        self.copy_subtree(title_tree,i1,i4)
+        title_tree.remove(i1)
+        path=title_tree.get_path(i4)
+        current_line=find_line(path)
+        tree.get_selection().select_iter(i4)
+    def move_right(self,widget):
+        global submenu_list
+        liststore_d.clear()
+        if len(path)==1:
+            parent=fbm
+        else:
+            parent=find_line(path[:-1])[4]
+        ind=path[-1]
+        if ind==len(parent)-1: return
+        if len(path)==1 and ind==0: return
+        submenu_list=[ i for i in parent if (len(i)==5 and i!=current_line)]
+        if len(submenu_list)==0: return
+        for i in submenu_list:
+            liststore_d.append((i[1],))
+        
+        dialog.show()
+    def cancel_d(self,widget):
+        dialog.hide()
+    def ok_d(self,widget):
+        global path
+        global current_line
+        submenu_list_t=[]
+        sm=cb_d.get_active()
+        i1=title_tree.get_iter(path)
+        i2=title_tree.iter_parent(i1)
+        for i in xrange(title_tree.iter_n_children(i2)):
+            itr=title_tree.iter_nth_child(i2,i)
+            if title_tree.iter_has_child(itr) and title_tree.get_path(itr)!=title_tree.get_path(i1): submenu_list_t.append(itr)
+#        print len(submenu_list_t), len(submenu_list)
+        if sm==-1:
+            dialog.hide()
+            return
+        submenu=submenu_list[sm]
+        submenu_t=submenu_list_t[sm]
+        i3=title_tree.iter_nth_child(submenu_t,title_tree.iter_n_children(submenu_t)-1)
+        i4=title_tree.insert_before(submenu_t,i3)
+        if len(path)==1:
+            parent=fbm
+        else:
+            parent=find_line(path[:-1])[4]
+        ind=path[-1]
+        submenu[4].insert(-1,current_line)
+        del parent[ind]
+        self.copy_subtree(title_tree,i1,i4)
+        title_tree.remove(i1)
+        path=title_tree.get_path(i4)
+        current_line=find_line(path)
+        tree.expand_to_path(path[:-1])
+        tree.get_selection().select_iter(i4)
+        dialog.hide()
+    def delete_line(self,widget):
+        global path
+        if len(path)==1:
+            parent=fbm
+        else:
+            parent=find_line(path[:-1])[4]
+        ind=path[-1]
+        if ind==len(parent)-1: return
+        if len(path)==1 and ind==0: return
+        del parent[ind]
+        i1=title_tree.get_iter(path)
+        i4=title_tree.iter_next(i1)
+        title_tree.remove(i1)
+        path=title_tree.get_path(i4)
+        current_line=find_line(path)
+        tree.get_selection().select_iter(i4)
+    def new_line(self,widget):
+        new_dlg.show()
+    def save(self,widget):
+        fb_menu_save()
+    def save_as(self,widget):
+        s_dialog=save_dialog()
+        response = s_dialog.run()
+        if response == gtk.RESPONSE_OK:
+            fb_menu_save(s_dialog.get_filename())
+        s_dialog.destroy()
+    
+def fb_menu_load(fn="~/.fluxbox/menu"):
+    filename = os.path.expanduser(fn)
+    global fb_menu_text
+    try:
+        menu_file = open(filename,"r")
+    except IOError, err:
+        print filename+" : ",
+        print err.strerror
+        quit()
+    fb_menu_text_raw=menu_file.readlines()
+    fb_menu_text=[ i.decode("UTF-8") for i in fb_menu_text_raw]
+    menu_file.close()
+
+def parse_line(str):
+    global fbm
+    global stack    
+
+    s=re.sub(r"#.*","",str)
+    if len(s.split())==0: return
+    type_re=re.search(r"\[.*?\]",s)
+    if type_re : type_=type_re.group()[1:-1]
+    else : type_=""
+    name_re=re.search(r"\(.*?[^\\]\)",s)
+    if name_re : name=re.sub(r"\\\)",")",name_re.group()[1:-1])
+    else : name=""
+    command_re=re.search(r"{.*?}",s)
+    if command_re : command=command_re.group()[1:-1]
+    else : command=""
+    img_re=re.search(r"<.*?>",s)
+    if img_re : img=img_re.group()[1:-1]
+    else : img=""
+    line=[type_,name,command,img]
+    curlevel=stack[-1]
+    if type_=="submenu":
+        line.append([])
+        stack.append(line[-1])
+    if type_=="end":
+        stack.pop()
+    curlevel.append(line)
+#    print len(stack)
+    
+
+def fb_menu_parse():
+    count=0
+    for i in fb_menu_text:
+        parse_line(i)
+
+
+
+def save_lines(line):
+    global ident
+    global menu
+    for i in line:
+        type_="["+i[0]+"]"
+        title=" ("+re.sub(r"\)","\)",i[1])+")"
+        cmd=" {"+i[2]+"}"
+        img=" <"+i[3]+">"
+        if type_=="[end]":
+            ident-=1
+            if ident<0: ident=0
+        menu+=ident_str*ident
+        menu+=type_
+        menu+=title
+        menu+=cmd
+        menu+=img
+        menu+="\n"
+        if type_=="[submenu]":
+            ident+=1
+            save_lines(i[4])
+    
+
+def fb_menu_save(fn="~/.fluxbox/menu"):
+    global ident
+    global menu
+    filename = os.path.expanduser(fn)
+    try:
+        menu_file = open(filename,"w")
+    except IOError, err:
+        print filename+" : ",
+        print err.strerror
+        quit()
+    ident=0
+    menu="#fluxbox menu\n#generated by fbmed\n"
+    save_lines(fbm)
+    menu_file.write(menu)
+    menu_file.close()
+    
+
+def init_ui():
+        global title_tree,tree
+        global dialog
+        global cb_d
+        global liststore_d
+        global new_dlg
+        st=[None]
+        hndl=handlers_class()
+        main_window = gtk.Window(gtk.WINDOW_TOPLEVEL)
+        main_window.connect("delete_event", hndl.delete_event)
+        main_window.connect("destroy", hndl.destroy)
+        main_window.set_size_request(640,400)
+        vbox=gtk.VBox()
+        vbox.show()
+        vbox.set_homogeneous(False)
+
+        al1=gtk.Alignment(0,0,0,0)
+        al1.show()
+
+        al2=gtk.Alignment(0,0,1,1)
+        al2.show()
+        
+        hbox1=gtk.HBox()
+        hbox1.show()
+        
+        
+        al1.add(hbox1)
+        vbox.add(al1)
+        vbox.set_child_packing(al1,0,0,0,0)
+        
+        class add_to_toolbar:
+            def __init__(self,stock,on_click,hint):
+                global toolbar
+                self.button=gtk.ToolButton(stock)
+                self.button.set_has_tooltip(True)
+                self.button.set_tooltip_text(hint)
+                self.button.show()
+                toolbar.append(self.button)
+                if on_click: self.button.connect("clicked",on_click)
+                hbox1.add(self.button)
+
+        
+        button_up=add_to_toolbar(gtk.STOCK_GO_UP,hndl.move_up,"Move Up")
+        button_down=add_to_toolbar(gtk.STOCK_GO_DOWN,hndl.move_down,"Move Down")
+        button_left=add_to_toolbar(gtk.STOCK_GO_BACK,hndl.move_left,"Prev. Level")
+        button_right=add_to_toolbar(gtk.STOCK_GO_FORWARD,hndl.move_right,"Next Level")
+        s0=gtk.SeparatorToolItem()
+        s0.show()
+        hbox1.add(s0)
+        button_add=add_to_toolbar(gtk.STOCK_ADD,hndl.new_line,"New Line")
+        button_del=add_to_toolbar(gtk.STOCK_DELETE,hndl.delete_line,"Delete line")
+        s1=gtk.SeparatorToolItem()
+        s1.show()
+        hbox1.add(s1)
+        button_img=add_to_toolbar(gtk.STOCK_SELECT_COLOR,hndl.open_img,"Select icon")
+        button_imgdel=add_to_toolbar(gtk.STOCK_MISSING_IMAGE,hndl.delete_icon,"Delete icon")
+        s2=gtk.SeparatorToolItem()
+        s2.show()
+        hbox1.add(s2)
+        button_save=add_to_toolbar(gtk.STOCK_SAVE,hndl.save,"Save")
+        button_save_as=add_to_toolbar(gtk.STOCK_SAVE_AS,hndl.save_as,"Sava As")
+        
+        for i in toolbar: i.set_sensitive(False)
+        tree=gtk.TreeView()
+        tree.connect("cursor-changed",hndl.tree_selected)
+
+        
+        renderer1 = gtk.CellRendererText()
+        renderer1.set_property( 'editable', True )
+        renderer1.connect( 'edited', hndl.title_edited_cb, None )
+        renderer2 = gtk.CellRendererText()
+        renderer2.set_property( 'editable', False )
+        renderer3 = gtk.CellRendererPixbuf()
+        renderer4 = gtk.CellRendererText()
+        renderer4.set_property( 'editable', True )
+        renderer4.connect( 'edited', hndl.cmd_edited_cb, None )
+        
+        
+        name_col=gtk.TreeViewColumn("Title",renderer1,text=0)
+        type_col=gtk.TreeViewColumn("Type",renderer2,text=1)
+        cmd_col=gtk.TreeViewColumn("Command",renderer4,text=2)
+        img_col=gtk.TreeViewColumn("Icon",renderer3,pixbuf=3)
+        
+        
+        title_tree=gtk.TreeStore(str,str,str,gtk.gdk.Pixbuf)
+        tree.append_column(name_col)
+        tree.append_column(type_col)
+        tree.append_column(cmd_col)
+        tree.append_column(img_col)
+        
+        def add_lines(menu):
+            for line in menu:
+                img_name=os.path.expanduser(line[3])
+                if (line[3]=="" or os.path.exists(img_name)==False):
+                    pb=tree.render_icon(stock_id=gtk.STOCK_MISSING_IMAGE,
+                                size=gtk.ICON_SIZE_MENU,
+                                detail=None)
+                else:
+                    pb=gtk.gdk.pixbuf_new_from_file(img_name).scale_simple(16,16,gtk.gdk.INTERP_BILINEAR)
+                l=title_tree.append(st[-1],[line[1],line[0],line[2],pb])
+                if line[0]=="submenu":
+                    st.append(l)
+                    add_lines(line[4])
+                if line[0]=="end":
+                    st.pop()
+
+        add_lines(fbm)
+        
+#        l1=title_tree.append(None,["0level","type1","cmd1"])
+#        l2=title_tree.append(l1,["1level","type2","cmd2"])
+#        l3=title_tree.append(l2,["2level","type3","cmd3"])
+        
+        
+        tree.set_model(title_tree)
+        tree.show()
+
+        sw=gtk.ScrolledWindow()
+        sw.show()
+        sw.add(tree)
+        al2.add(sw)
+        vbox.add(al2)
+        main_window.add(vbox)
+        
+        main_window.show()
+
+        dialog=gtk.Window()
+        dialog.set_title("Choose submenu")
+        vbox2=gtk.VBox()
+        vbox2.show()
+        dialog.add(vbox2)
+        al_d1=gtk.Alignment(0,0,1,0)
+        hbox_d=gtk.HBox()
+        hbox_d.show()
+        al_d1.add(hbox_d)
+        al_d1.show()
+        button_cancel_d=gtk.Button(stock=gtk.STOCK_CANCEL)
+        button_ok_d=gtk.Button(stock=gtk.STOCK_OK)
+        button_cancel_d.show()
+        button_ok_d.show()
+        hbox_d.add(button_cancel_d)
+        hbox_d.add(button_ok_d)
+        liststore_d = gtk.ListStore(str)
+        cb_d = gtk.ComboBox(liststore_d)
+        cell_d = gtk.CellRendererText()
+        cb_d.pack_start(cell_d, True)
+        cb_d.add_attribute(cell_d, 'text', 0)
+
+        cb_d.show()
+        vbox2.add(cb_d)
+        vbox2.add(al_d1)
+        dialog.connect("delete_event", hndl.delete_event_d)
+        button_cancel_d.connect("clicked",hndl.cancel_d)
+        button_ok_d.connect("clicked",hndl.ok_d)
+
+        class new_dialog:
+            class new_label:
+                def __init__(self,text,container):
+                    self.label=gtk.Label(text)
+                    self.label.set_alignment(0,0.5)
+                    self.label.show()
+                    container.add(self.label)
+            def load_img(self,widget,event):
+                self.open_img_dialog=open_image_dialog()
+                self.response = self.open_img_dialog.run()
+                if self.response == gtk.RESPONSE_OK:
+                    self.img_filename=self.open_img_dialog.get_filename()
+                    self.pb=gtk.gdk.pixbuf_new_from_file(self.img_filename).scale_simple(16,16,gtk.gdk.INTERP_BILINEAR)
+                    self.img_n.set_from_pixbuf(self.pb)
+                else:
+                    pass
+                self.open_img_dialog.destroy()
+            def cancel(self,widget):
+                self.window.hide()
+            def delete_event(self, widget, event, data=None):
+                self.window.hide()
+                return True
+            def ok(self,widget):
+                global path
+                if len(path)==1:
+                    parent=fbm
+                else:
+                    parent=find_line(path[:-1])[4]
+                ind=path[-1]
+                if ind==len(parent)-1:
+                    dst=ind
+                else: dst=ind+1
+                p=list(path[:-1])
+                p.append(dst)
+                t=self.cbnt.get_active_text()
+                line=[t,self.ent_n_t.get_text(),self.ent_n_c.get_text(),self.img_filename]
+                if t=="submenu": line.append([["end","","",""]])
+                parent.insert(dst,line)
+                i1=title_tree.get_iter(tuple(p))
+                i2=title_tree.iter_parent(i1)
+                i4=title_tree.insert_before(i2,i1)
+                title_tree.set(i4,0,line[1],1,line[0],2,line[2],3,self.pb)
+                if t=="submenu":
+                    title_tree.append(i4,["","end","",self.empty_pb])
+                
+                
+                self.window.hide()
+            def __init__(self):
+                self.window=gtk.Window()
+                self.window.set_title("new entry")
+                self.vbox_n=gtk.VBox()
+                self.vbox_n.show()
+                self.window.add(self.vbox_n)
+                self.hbox_n1=gtk.HBox()
+                self.hbox_n1.show()
+                self.vbox_n.add(self.hbox_n1)
+                self.label_type=self.new_label("Type:",self.hbox_n1)
+                self.list_n_type = gtk.ListStore(str)
+                self.list_n_type.append(["exec"])
+                self.list_n_type.append(["submenu"])
+                self.list_n_type.append(["nop"])
+                self.cbnt = gtk.ComboBoxEntry(self.list_n_type, 0)
+                self.cbnt.set_active(0)
+                self.cbnt.show()
+                self.hbox_n1.add(self.cbnt)
+                self.hbox_n2=gtk.HBox()
+                self.hbox_n2.show()
+                self.vbox_n.add(self.hbox_n2)
+                self.label_title=self.new_label("Title:",self.hbox_n2)
+                self.ent_n_t=gtk.Entry()
+                self.ent_n_t.show()
+                self.hbox_n2.add(self.ent_n_t)
+                self.hbox_n3=gtk.HBox()
+                self.hbox_n3.show()
+                self.vbox_n.add(self.hbox_n3)
+                self.label_cmd=self.new_label("Command:",self.hbox_n3)
+                self.ent_n_c=gtk.Entry()
+                self.ent_n_c.show()
+                self.hbox_n3.add(self.ent_n_c)
+                self.hbox_n4=gtk.HBox()
+                self.hbox_n4.show()
+                self.vbox_n.add(self.hbox_n4)
+                self.label_img=self.new_label("Icon:",self.hbox_n4)
+                self.img_n=gtk.image_new_from_stock(stock_id=gtk.STOCK_MISSING_IMAGE,size=gtk.ICON_SIZE_MENU)
+                self.img_n.show()
+                self.img_eb=gtk.EventBox()
+                self.img_eb.show()
+                self.img_eb.add(self.img_n)
+                self.hbox_n4.add(self.img_eb)
+                self.hbox_n5=gtk.HBox()
+                self.hbox_n5.show()
+                self.vbox_n.add(self.hbox_n5)
+                self.button_cancel_n=gtk.Button(stock=gtk.STOCK_CANCEL)
+                self.button_ok_n=gtk.Button(stock=gtk.STOCK_OK)
+                self.button_cancel_n.show()
+                self.button_ok_n.show()
+                self.hbox_n5.add(self.button_cancel_n)
+                self.hbox_n5.add(self.button_ok_n)
+                self.img_filename=""
+                self.img_eb.connect("button-press-event",self.load_img)
+                self.button_cancel_n.connect("clicked",self.cancel)
+                self.window.connect("delete-event",self.delete_event)
+                self.button_ok_n.connect("clicked",self.ok)
+            def show(self):
+                self.list_n_type.clear()
+                self.list_n_type.append(["exec"])
+                self.list_n_type.append(["submenu"])
+                self.list_n_type.append(["nop"])
+                self.cbnt.set_active(0)
+                self.ent_n_t.set_text("")
+                self.ent_n_c.set_text("")
+                self.img_filename=""
+                self.pb=tree.render_icon(stock_id=gtk.STOCK_MISSING_IMAGE,
+                                size=gtk.ICON_SIZE_MENU, detail=None)
+                self.img_n.set_from_pixbuf(self.pb)
+                self.empty_pb=self.pb
+                self.window.show()
+            
+        new_dlg=new_dialog()
+
+
+
+
+def main():
+    fb_menu_load()
+    fb_menu_parse()
+
+    init_ui()
+    gtk.main()
+
+
+if __name__ == "__main__":
+    main()
